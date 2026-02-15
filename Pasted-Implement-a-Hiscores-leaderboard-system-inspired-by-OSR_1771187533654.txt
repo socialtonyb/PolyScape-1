@@ -1,0 +1,42 @@
+Implement a “Hiscores” leaderboard system inspired by OSRS.
+
+1) Create a Hiscores page (/hiscores) with:
+- Period toggle: Daily / Weekly / Monthly / Yearly
+- Metric toggle: GP Profit, Predictions Correct, Skill XP Gained (overall XP gained during selected period)
+- A ranked table with columns: Rank, Username, Metric Value
+- Search bar that lets users search usernames and navigate to their profile
+- Pagination (25 rows per page)
+
+2) Define metrics:
+- GP Profit leaderboard = net trading GP gained in the selected period (sells + resolve payouts - buys). Exclude random event/achievement GP unless explicitly enabled by a config.
+- Predictions Correct leaderboard = count of correct resolved markets in the selected period where the user had a meaningful stake AND was not hedged at resolve.
+- Skill XP Gained leaderboard = total XP gained across all skills in the selected period.
+
+3) Skills Hiscores (/hiscores/skills):
+- No period toggle here.
+- Tabs: Overall + individual skills.
+- Overall table ranks users by Total Level (sum of skill levels) and shows Total XP.
+- Individual skill pages show Username, Skill Level, Skill XP.
+- Pagination and search.
+
+4) User lookup profile (/hiscores/user/[username]):
+Show:
+- Total Level + Total XP
+- Prediction accuracy (Correct/Total + percent)
+- Lifetime GP trading profit (and optionally last 30 days)
+Tabs:
+- Skills: list all 8 skills with level + xp
+- Recent Bets: last 5 bets with market, outcome, shares, GP spent/received, timestamp; “See more” shows full paginated history
+- Current Positions: list open market positions with shares and net GP spent (“amount wagered”) per market
+
+5) Data + performance:
+- Create a per-user-per-market resolution summary row on market settlement to store:
+  - correct boolean, hedged boolean, profitGp, resolvedAt
+- Create per-user period aggregates for daily/weekly/monthly/yearly:
+  - gpProfitTrading, predictionsCorrect, predictionsTotal, xpGainedTotal
+- Update aggregates incrementally after trades and resolves (or via scheduled jobs).
+- Add minimum meaningful stake rule to prevent farming: only count markets/trades above threshold for correctness and XP leaderboards.
+
+6) OSRS-inspired UI styling:
+- Parchment-like background, simple serif font, compact table, left-side navigation feel
+- Keep it clean and readable; do not use copyrighted OSRS assets unless they are user-uploaded.

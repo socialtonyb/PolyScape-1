@@ -1,0 +1,267 @@
+You are building an OSRS-inspired prediction market app with multiple skills. Implement a complete XP system (NO code in this output; just implement it in the app). The XP curve must match OSRS: level 99 is 13,034,431 XP, and ALL skills use the same XP table/curve. XP should NOT “scale with level” by multiplying rewards; instead, harder/rarer/gated activities should grant larger XP drops (OSRS-style). The system must be understandable to users and intentionally trainable (not hidden background math).
+
+GOALS
+1) Users should clearly understand how to train each skill.
+2) Users should reliably earn XP through intentional actions.
+3) Prevent XP farming via spam (tiny trades, rapid buy/sell).
+4) Make leveling feasible: because prediction markets resolve less frequently than OSRS combat actions, XP drops must be “chunky” (quest-like) while still feeling OSRS.
+
+SKILLS (8 total)
+- Augury (Prediction)
+- Scrying (Market Analysis)
+- Merchanting (Trading)
+- Wardcraft (Risk Management)
+- Tickcraft (Timing)
+- Wanderer (Random Events)
+- Fashioncraft (Cosmetics)
+- Slayer’s Focus (Consistency)
+
+GLOBAL RULES (ANTI-FARM + CLARITY)
+A) Qualifying stake requirement
+- XP triggers only if the user has a “meaningful position” in that market:
+  - Minimum threshold = max(200 GP, 1% of wallet balance at time of entry)
+- Any action below threshold grants 0 XP for skill triggers tied to that market.
+
+B) Per-market caps
+- For each skill, enforce a maximum XP earned per market per user to prevent farming.
+- Use “best event wins”: if multiple triggers happen in the same market, only award the single largest qualifying XP for that skill.
+
+C) Timing and spam controls
+- Do not award Merchanting XP for buy->sell “flips” faster than 3 minutes.
+- Do not award XP for “micro profits” (profit under 50 GP) in Merchanting.
+- Limit “Scrying validations” to 1 per market.
+- Limit Tickcraft to 1 award per market.
+
+D) Hedging logic for prediction-based skills
+- If user holds shares on BOTH sides at resolve (“hedged”), reduce or remove XP for Augury and Slayer’s Focus streak credit:
+  - Augury XP reduced by 80% if hedged at resolve
+  - Slayer’s Focus: hedged resolves do NOT count toward streaks and do NOT count as win/loss
+
+E) User-facing clarity requirements (MUST IMPLEMENT IN UI)
+- Skills page must show for each skill:
+  - “How to train” (2–3 bullets)
+  - “Next XP opportunities” (dynamic hints based on user’s current state)
+- Whenever XP is awarded, show an OSRS-style XP drop/toast:
+  - Example: “+18,000 Augury XP (Underdog Win)”
+- On the market page, show explicit “windows” for Tickcraft:
+  - “Early Window” and “Clutch Window” labels when applicable
+- Scrying must be player-declared (checkbox on entry) so it doesn’t feel random.
+
+OSRS XP CURVE REQUIREMENT
+- Implement xpForLevel(level) and levelForXp(xp) using the OSRS XP table logic so that:
+  - Level 99 = 13,034,431 XP
+- All skills share this exact level curve.
+
+XP SOURCES (MECHANICS) — PER SKILL
+
+1) AUGURY (Prediction)
+What it means: being correct (without hedging), especially when the market disagrees.
+Train loop: take a position → hold through resolve → be correct.
+
+XP triggers (on market RESOLUTION only; 1 award per market):
+- Base Participation XP (if meaningful position at resolve): small chunk
+- Win (unhedged): big chunk
+- Underdog Win bonus tiers (entry price at time of FIRST meaningful buy):
+  - Tier A: entry ≤ 0.40
+  - Tier B: entry ≤ 0.25
+- Loss (unhedged): optional small chunk OR 0 (choose one and be consistent)
+- Hedged at resolve: reduce Augury XP by 80% (still allow tiny participation XP if you want)
+
+2) SCRYING (Market Analysis)
+What it means: making a value call that is validated by later market movement.
+Train loop: declare a “Scry” → market moves in your favor → validation.
+
+Mechanic requirement (MUST):
+- When user buys, allow them to toggle “Scry this entry”.
+- They select a validation threshold: +10% price move in their favor before close (default).
+- The app tracks whether the market price moves enough toward their outcome before close.
+
+XP triggers (as soon as validation happens; 1 per market):
+- Validation XP when the market crosses the threshold after their entry
+- Bonus XP if they ALSO win at resolve (unhedged)
+- If they never validate, award 0 Scrying XP (keeps it clear and intentional)
+
+3) MERCHANTING (Trading)
+What it means: realized profit through good trading, not spam.
+Train loop: buy → sell later → realize profit.
+
+XP triggers (on SELL only; can award multiple times but capped per market/day):
+- Award XP only if:
+  - time since corresponding buy ≥ 3 minutes
+  - realized profit ≥ 50 GP
+- XP amount should be based on profit “bands” (not raw volume):
+  - small profit band, medium band, large band, huge band
+- Optional: extra XP for profit in low-liquidity markets (higher slippage), but keep simple if needed.
+- Enforce cap: max Merchanting XP per market per day.
+
+4) WARDCRAFT (Risk Management)
+What it means: discipline and protection, evaluated as “daily wards”.
+Train loop: follow daily rules → earn a daily XP drop.
+
+Mechanic requirement:
+- Create a “Daily Ward” checklist visible on Wallet/Risk/Skills:
+  - Ward 1: No single market exceeded 25% exposure today
+  - Ward 2: Traded in ≥ 2 categories today
+  - Ward 3: Avoided hedging at resolve today (optional)
+- Evaluate once per day (server-side) and award XP once daily based on how many wards completed.
+
+Harder content:
+- Unlock stricter wards at higher Wardcraft levels (e.g., 20% cap, 3 categories, 3 consecutive days).
+- Make these like OSRS higher-level training methods: more reward, harder.
+
+5) TICKCRAFT (Timing)
+What it means: executing in explicit timing windows.
+Train loop: enter early/clutch with meaningful stake.
+
+Mechanic requirement (MUST):
+- On each market, define:
+  - Early Window: first 10% of market lifespan
+  - Clutch Window: last 10% before close (or last 1 hour, whichever is smaller)
+- Show these windows explicitly on the market UI.
+
+XP triggers (1 per market):
+- Early Entry XP: if meaningful entry occurs in Early Window
+- Clutch Win XP: if meaningful entry occurs in Clutch Window AND user wins at resolve (unhedged)
+- If both happen, award the larger one (best event wins).
+
+6) WANDERER (Random Events)
+What it means: completing OSRS-style random event tasks.
+Train loop: do events → complete tasks → get XP.
+
+Mechanic requirement:
+- Random events must require a mini task (not just “claim”).
+- Award XP only on successful completion.
+- Add difficulty tiers of events (basic/advanced) that can unlock at higher Wanderer levels.
+
+XP triggers:
+- Completion XP (varies by event difficulty)
+- Bonus XP for weekly streak (e.g., complete 3 events in a week)
+- Daily cap to prevent farming.
+
+7) FASHIONCRAFT (Cosmetics)
+What it means: collecting uniques and completing sets.
+Train loop: unlock unique pieces → complete sets.
+
+XP triggers:
+- New cosmetic piece obtained (first-time only): XP
+- Completing a full set: big XP
+- Unlocking an “Event Bag” cosmetic reward: bigger XP
+- Duplicate pieces: 0 Fashioncraft XP
+
+8) SLAYER’S FOCUS (Consistency)
+What it means: streaks and weekly contracts (not hidden math).
+Train loop: pursue streaks + choose a weekly contract.
+
+Mechanics (MUST):
+A) Streak milestones (unhedged wins only):
+- Award big XP when achieving streak milestones:
+  - 3, 5, 10 (and optionally 15+)
+- Each milestone is one-time per user (like achievement unlocks).
+
+B) Weekly Focus Contract (choose 1/week):
+- Present 3 contract options each week:
+  1) “Win 6 unhedged resolves this week”
+  2) “Achieve a 60% win rate over 20 unhedged resolves”
+  3) “No hedge for 10 resolves”
+- Contract completion grants a chunky XP drop.
+- Higher-tier contracts unlock at higher Slayer’s Focus levels (harder requirements, more XP).
+
+XP AMOUNTS (OSRS-FEELING, CHUNKY, TIERED)
+Implement XP as tiered drops rather than tiny increments. Use these recommended ranges:
+
+General guidance:
+- Micro feedback (small): 100–1,000 XP
+- Meaningful event (medium): 5,000–25,000 XP
+- Big milestone (large): 50,000–150,000 XP
+- Grandmaster milestone (very large): 200,000–500,000 XP
+
+Skill-specific recommended XP drop bands:
+- Augury:
+  - Participation: 1,000
+  - Win: 12,000
+  - Underdog win bonus: +6,000 (≤0.40), +12,000 (≤0.25)
+- Scrying:
+  - Validation: 8,000
+  - Validation + win: +6,000
+- Merchanting (profit bands):
+  - Profit 50–199: 1,000
+  - 200–999: 4,000
+  - 1,000–4,999: 12,000
+  - 5,000+: 25,000
+- Wardcraft (daily):
+  - 1 ward: 2,000
+  - 2 wards: 6,000
+  - 3 wards: 12,000
+  - higher-level wards (unlocked): 18,000–30,000
+- Tickcraft:
+  - Early entry: 3,000
+  - Clutch win: 15,000
+- Wanderer:
+  - Basic event completion: 4,000
+  - Advanced event completion: 10,000
+  - Weekly streak bonus: 15,000
+- Fashioncraft:
+  - New unique piece: 6,000
+  - Set completion: 50,000
+  - Event Bag unlock: 75,000
+- Slayer’s Focus:
+  - Streak milestones: 3=20,000; 5=50,000; 10=120,000
+  - Weekly contract completion: 40,000–150,000 depending on contract tier
+
+IMPORTANT: These values are intentionally chunky to make level 99 achievable in a reasonable timeframe.
+
+DIARY TIERS AND “HARDER CONTENT GIVES MORE XP”
+Implement a Combat Achievement Diary system for the prediction market with tiers:
+- EASY, MEDIUM, HARD, ELITE, GRANDMASTER
+Each tier’s tasks grant higher XP and sometimes cosmetic rewards.
+When a player completes a diary task, they earn:
+- Diary XP reward that can be assigned to one or more relevant skills (e.g., an Augury task gives Augury XP).
+Recommended diary XP by tier:
+- Easy: 5,000–12,000
+- Medium: 15,000–30,000
+- Hard: 35,000–70,000
+- Elite: 80,000–150,000
+- Grandmaster: 200,000–500,000
+
+ACHIEVEMENT + DIARY CLARITY
+- Every diary task should clearly state:
+  - “How to do it” (simple)
+  - “Where XP goes” (which skill(s) gain XP and how much)
+- When a task completes, show:
+  - Sword badge tier
+  - XP drop(s) per skill
+
+XP PROGRESS BAR REQUIREMENT
+For each skill, show:
+- Level
+- Total XP
+- XP remaining to next level
+- Progress bar filled by:
+  (currentXP - xpAtCurrentLevel) / (xpAtNextLevel - xpAtCurrentLevel)
+Use OSRS-style visual: bordered chunky bar, optional tick marks, pixel crisp rendering.
+
+IMPLEMENTATION CHECKLIST (NO CODE OUTPUT, JUST BUILD)
+- Add DB tables: UserSkill (xp), SkillLedger (optional), UserStats, DiaryTask, UserDiaryProgress, RandomEvent, CosmeticInventory, WeeklyContract.
+- Add event hooks:
+  - after trade: evaluate Tickcraft windows, roll random event
+  - after sell: Merchanting profit evaluation
+  - on market resolve: Augury + Slayer’s Focus + win/loss/streak updates
+  - daily cron or daily evaluation: Wardcraft wards
+  - weekly cron: generate weekly Focus contracts
+  - on cosmetic unlock: Fashioncraft XP
+  - on Scry validation: Scrying XP
+- Ensure all awards respect caps, stake thresholds, and anti-farm rules.
+
+ACCEPTANCE TESTS (BEHAVIORAL)
+- A user can intentionally train each skill and understands how:
+  - Augury: win unhedged resolves
+  - Scrying: declare Scry and get validation
+  - Merchanting: realize profit after time delay
+  - Wardcraft: complete daily ward checklist
+  - Tickcraft: trade during labeled windows
+  - Wanderer: complete event tasks
+  - Fashioncraft: unlock uniques/sets
+  - Slayer’s Focus: streak milestones + weekly contract
+- XP correctly updates level using OSRS curve and progress bar updates.
+- Hedging prevents streak credit and reduces Augury XP as specified.
+- Tiny trades do not grant XP due to qualifying stake rules.

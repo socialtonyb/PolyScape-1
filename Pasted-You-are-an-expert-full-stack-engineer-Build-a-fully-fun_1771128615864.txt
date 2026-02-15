@@ -1,0 +1,216 @@
+You are an expert full-stack engineer. Build a fully functional Polymarket-style prediction market web app using *play currency* called GP (Old School RuneScape vibe). NO real money, NO crypto, NO on-chain. Users trade with GP only.
+
+NON-NEGOTIABLE CONSTRAINTS
+- Only ADMIN users can create markets and resolve (settle) markets.
+- Regular users can only browse, buy/sell shares, and view portfolio/wallet.
+- There is NO “Grand Exchange tax” on sells: sell fee MUST be 0%.
+- Pricing must use an AMM (LMSR) like Polymarket-style shares.
+- App must run in Replit end-to-end: database, backend, frontend, auth.
+- Produce a clean, usable UI and working MVP (production deployable).
+
+TECH STACK (Replit friendly; choose sensible defaults)
+- Full-stack web app with a React-based frontend and an API backend
+- Database: PostgreSQL (preferred) or SQLite if Postgres isn’t available in the workspace
+- Use an ORM (Prisma/Drizzle/TypeORM—pick one and implement consistently)
+- Authentication with sessions + role-based access control (RBAC)
+- Server endpoints for all flows below
+- Basic rate limiting and audit logging
+
+CORE PRODUCT REQUIREMENTS
+
+1) Markets + LMSR AMM (Polymarket-like)
+Goal: Users “buy shares” of outcomes priced by LMSR. Shares settle to 1 GP per share if winning, 0 if losing.
+- Market fields:
+  - title, description, category, slug
+  - status: OPEN, CLOSED, RESOLVED, INVALID
+  - closeTime (trading stops after this)
+  - outcomes (2+ outcomes; common YES/NO)
+  - LMSR liquidity parameter b
+  - LMSR state for each outcome: qShares (outstanding shares)
+- LMSR functions (implement server-side):
+  - cost function C(q) = b * ln(sum_i exp(q_i/b))
+  - price p_i = exp(q_i/b) / sum_j exp(q_j/b)
+  - buy cost = C(q_after) − C(q_before)
+  - sell refund = C(q_before) − C(q_after)
+- Rules:
+  - Shares are integers.
+  - Trades must be transaction-safe; prevent race conditions.
+  - Show current price/probability per outcome.
+  - Selling is allowed and must have 0% fee (no tax on sells).
+  - Buying fee can be 0 by default (configurable).
+
+2) Wallet (GP) + Ledger
+Goal: Every GP movement is tracked.
+- Each user has a Wallet with balanceGp.
+- Every balance change creates a Transaction record:
+  - type (BUY, SELL, RESOLVE_PAYOUT, REFUND, ACHIEVEMENT_REWARD, RANDOM_EVENT_REWARD, ADMIN_ADJUST, etc.)
+  - amountGp (positive or negative)
+  - metadata JSON (market id, outcome id, shares, reason)
+- Trades are recorded separately:
+  - BUY/SELL, shares, gpSpentOrReceived, feeGp, timestamp
+
+3) Positions / Portfolio
+Goal: Track user holdings (shares) by outcome.
+- A Position is per user per outcome:
+  - shares held
+- Portfolio page shows:
+  - holdings per market/outcome
+  - trade history (optional)
+  - estimated market value (optional, based on current LMSR prices)
+
+4) Admin-only Market Creation + Settlement
+Goal: Admins control creation and resolution.
+Admin capabilities:
+- Create market:
+  - set closeTime, liquidity b, outcomes
+- Close market (optional)
+- Resolve market:
+  - pick winning outcome OR mark INVALID
+  - once resolved/invalid, trading stops permanently
+- Settlement logic:
+  - For RESOLVED: winning shares pay 1 GP per share; losing shares pay 0
+  - Pay out all users who hold winning shares at resolution
+  - Settlement must be idempotent (cannot double pay)
+- Maintain AdminAuditLog:
+  - admin id, action, metadata, timestamp
+
+5) Random Events (OSRS flavor) — MUST IMPLEMENT
+Goal: Rare rewards that spawn after trades.
+- Trigger: after a user places any trade (buy or sell), server rolls chance.
+- Spawn chance: 2% per trade (config constant).
+- Cooldown: max 1 spawned event per user per 6 hours.
+- Expiry: 15 minutes after spawn.
+- If spawned, UI shows a modal/banner:
+  - event type
+  - rewards preview (or reveal on claim)
+  - countdown timer
+  - “Claim” button
+- Claim rules (server enforced):
+  - belongs to user
+  - not claimed
+  - not expired
+- On claim:
+  - award GP + Prediction XP (see skills)
+  - record as RANDOM_EVENT_REWARD transaction (GP) + XP increment
+- Event types:
+  - GENIE, LAMP, DWARF, JEKYLL
+- Rewards:
+  - randomized within min/max per type
+  - slightly scaled by user Prediction level (cap scaling so it doesn’t explode)
+- Store each event in RandomEvent table with spawnedAt, expiresAt, claimedAt, rewardGp, rewardXp.
+
+6) Achievement Diary (OSRS-style) — MUST IMPLEMENT
+Goal: Predefined tasks with tiers and rewards.
+- Achievement definitions:
+  - slug, title, description, tier (EASY/MEDIUM/HARD)
+  - rewardGp, rewardXp
+  - criteria JSON (simple structured format)
+- UserAchievement tracking:
+  - completedAt
+  - progress JSON (optional)
+- Server evaluates achievements on key triggers:
+  - after trade placed
+  - after random event claimed
+  - after market resolved/payout
+- On completion:
+  - mark completedAt
+  - award GP + XP
+  - create transaction for GP reward
+  - show UI notification/toast
+- Seed at least these achievements:
+  EASY:
+    - first-trade: place 1 trade (reward 500 GP, 50 XP)
+    - getting-started: place 10 trades (1000 GP, 150 XP)
+    - friendly-stranger: claim 1 random event (500 GP, 100 XP)
+  MEDIUM:
+    - big-spender: 100,000 GP total volume (2500 GP, 400 XP)
+    - solid-predictor: 10 resolved wins (2000 GP, 500 XP)
+  HARD:
+    - hot-streak: best win streak of 5 (5000 GP, 1200 XP)
+    - random-event-hunter: claim 5 random events (3000 GP, 1000 XP)
+
+7) Skills: Prediction XP + Levels (OSRS curve) — MUST IMPLEMENT
+Goal: Add “Prediction” as a skill with XP and a derived level.
+- Store Prediction skill XP per user.
+- Implement classic RuneScape XP curve:
+  - xpForLevel(level)
+  - levelForXp(xp)
+  - Level cap 99
+- XP earning rules (simple + deterministic):
+  - On each trade: + (5 XP + floor(abs(gpAmount)/100)) XP (cap per trade optional)
+  - On winning resolved market (user has any winning shares): +50 XP
+  - On random event claim: +rewardXp
+  - On achievement completion: +rewardXp
+- Skills UI shows:
+  - current level
+  - XP total
+  - XP to next level + progress bar
+
+8) User Stats (needed for achievements and later leaderboards)
+Goal: Track user performance and activity.
+UserStats fields:
+- tradesCount
+- marketsTradedCount (unique markets traded)
+- volumeGp (sum absolute GP amounts from trades)
+- wins, losses
+- currentStreak, bestStreak
+- lastRandomEventAt
+Win/loss/streak logic on resolve:
+- If user holds >0 winning shares at resolution and 0 losing shares => win; increment streak
+- If user holds only losing shares and 0 winning shares => loss; reset streak
+- If user holds both (hedged) => do not change streak and do not count as win/loss (keeps fair)
+
+PAGES / UX (clean, minimal but complete)
+- / (Home): featured/new markets + categories
+- /markets: list with search + filters (status/category)
+- /markets/[slug]: market detail
+  - outcome cards with live price/probability
+  - buy/sell widget (shares input; shows cost/refund)
+  - user’s current position in the market
+  - if random event spawned, show claim modal/banner
+- /portfolio: holdings across markets + history
+- /wallet: GP balance + transaction ledger
+- /skills: Prediction skill level + XP progress
+- /achievements: diary grouped by tier + completion state
+- /admin (ADMIN only):
+  - create market
+  - resolve/invalid market
+  - view audit log
+
+API ENDPOINTS (define and implement)
+User:
+- List markets
+- Get market details + current prices
+- Buy shares
+- Sell shares (0% sell fee)
+- Get wallet + transactions
+- Get positions/portfolio
+- Get skills
+- Get achievements
+- Claim random event
+Admin:
+- Create market
+- Close market
+- Resolve market / invalidate
+- Read audit log
+- (Optional) adjust user balance for moderation/testing
+
+AUTH + SECURITY
+- Authentication required to trade/claim rewards/view wallet.
+- RBAC: admin routes only accessible to ADMIN role.
+- Enforce closeTime server-side.
+- Use database transactions for buy/sell/resolve to prevent inconsistencies.
+- Rate limit trade endpoints and random event claim endpoint.
+- Audit log all admin actions.
+
+SEEDING / DEFAULTS
+- Starting balance: 10,000 GP for each new user.
+- Auto-create Wallet, UserStats, and Prediction skill row on signup/first login.
+- Seed achievements and 3 example markets.
+- Provide a simple way to set the first admin (e.g., ENV var ADMIN_EMAIL or a manual admin promote script).
+
+DELIVERABLE
+- Build the complete working app in Replit.
+- Ensure it runs from a single “Run” action and includes setup instructions in README.
+- Do not ask me follow-up questions; make reasonable assumptions and implement the MVP end-to-end.
+- Prioritize correctness, transaction safety, and a clean UX.
